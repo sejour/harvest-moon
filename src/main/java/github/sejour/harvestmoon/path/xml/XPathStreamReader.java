@@ -2,85 +2,92 @@ package github.sejour.harvestmoon.path.xml;
 
 import static github.sejour.harvestmoon.path.xml.PathIterator.MATCHED;
 
+import java.util.function.Consumer;
+
 import javax.xml.stream.XMLEventReader;
 import javax.xml.stream.XMLStreamConstants;
 import javax.xml.stream.XMLStreamException;
+import javax.xml.stream.events.StartElement;
 
-import lombok.AllArgsConstructor;
+import io.reactivex.rxjava3.core.Observable;
 
-@AllArgsConstructor
 public class XPathStreamReader {
-    private final XMLEventReader reader;
-    private PathIterator iterator;
-
-    public String read() throws XMLStreamException {
-        if (!reader.hasNext()) {
-            return null;
-        }
-
-        final var builder = new StringBuilder();
-        final var result = goDown(reader, iterator, builder);
-        if (result == null) {
-            return read();
-        }
-        iterator = result;
-
-        return builder.toString();
+    public static Observable<String> readAll(XMLEventReader reader, PathIterator iterator) {
+        return Observable.create(emitter -> {
+            goDown(reader, iterator, emitter::onNext);
+            emitter.onComplete();
+        });
     }
 
-    private static PathIterator goDown(XMLEventReader reader, PathIterator iterator, StringBuilder builder) throws XMLStreamException {
+    private static void goDown(XMLEventReader reader, PathIterator iterator,
+                               Consumer<String> itemConsumer) throws XMLStreamException {
         while (reader.hasNext()) {
             final var event = reader.nextEvent();
 
             switch (event.getEventType()) {
                 case XMLStreamConstants.START_ELEMENT:
-                    if (iterator == null) {
-                        goDown(reader, null, null);
+                    final var element = event.asStartElement();
+                    final var nextIterator = iterator.next(element);
+                    if (nextIterator == null) {
+                        skipDown(reader);
                         continue;
                     }
-
-                    final var element = event.asStartElement();
-
-                    final var nextIterator = iterator.next(element);
                     if (nextIterator == MATCHED) {
-                        builder.append(element.toString());
+                        itemConsumer.accept(getDown(element, reader));
+                        continue;
                     }
-
-                    final var result = goDown(reader, nextIterator, builder);
-                    if (result != null) {
-                        if (result.getChild() == MATCHED) {
-                            return result;
-                        }
-                        if (iterator != MATCHED && nextIterator == MATCHED) {
-                            return iterator;
-                        }
-                    }
+                    goDown(reader, nextIterator, itemConsumer);
                     break;
                 case XMLStreamConstants.END_ELEMENT:
-                    if (iterator == MATCHED) {
-                        builder.append(event.asEndElement().toString());
-                    }
-                    if (builder != null && builder.length() > 0) {
-                        return iterator;
-                    }
-                    return null;
-                case XMLStreamConstants.CHARACTERS:
-                    if (iterator == MATCHED) {
-                        final var isCData = event.asCharacters().isCData();
-                        if (isCData) {
-                            builder.append("<![CDATA[");
-                        }
-                        builder.append(event.asCharacters().getData().trim());
-                        if (isCData) {
-                            builder.append("]]>");
-                        }
-                    }
-                    break;
+                    return;
                 default:
                     break;
             }
         }
+    }
 
-        return null;
+    private static void skipDown(XMLEventReader reader) throws XMLStreamException {
+        int down = 0;
+        while (reader.hasNext()) {
+            final var event = reader.nextEvent();
+            switch (event.getEventType()) {
+                case XMLStreamConstants.START_ELEMENT -> ++down;
+                case XMLStreamConstants.END_ELEMENT -> --down;
+            }
+            if (down < 0) {
+                return;
+            }
+        }
+    }
+
+    private static String getDown(StartElement startElement, XMLEventReader reader) throws XMLStreamException {
+        final var builder = new StringBuilder(startElement.toString());
+        int down = 0;
+        while (reader.hasNext()) {
+            final var event = reader.nextEvent();
+
+            if (event.isCharacters()) {
+                final var isCData = event.asCharacters().isCData();
+                if (isCData) {
+                    builder.append("<![CDATA[");
+                }
+                builder.append(event.asCharacters().getData().trim());
+                if (isCData) {
+                    builder.append("]]>");
+                }
+            } else {
+                builder.append(event.toString());
+            }
+
+            switch (event.getEventType()) {
+                case XMLStreamConstants.START_ELEMENT -> ++down;
+                case XMLStreamConstants.END_ELEMENT -> --down;
+            }
+            if (down < 0) {
+                return builder.toString();
+            }
+        }
+
+        throw new XMLStreamException();
     }
 }

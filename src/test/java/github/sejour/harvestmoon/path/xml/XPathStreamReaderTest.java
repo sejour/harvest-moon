@@ -1,7 +1,6 @@
 package github.sejour.harvestmoon.path.xml;
 
 import static java.util.Arrays.asList;
-import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.Collections;
 import java.util.List;
@@ -141,14 +140,12 @@ public class XPathStreamReaderTest {
                            "<data type='B'><header>yyy:bar-B-header</header><body>yyy:bar-B-body</body><footer>yyy:bar-B-footer</footer></data>"
                    ))
                     .build(),
-            /**
             Fixture.builder()
                    .path("//contents/group[@domain='yyy']//data[@type='B']")
                    .expects(asList(
                            "<data type='B'><header>yyy:bar-B-header</header><body>yyy:bar-B-body</body><footer>yyy:bar-B-footer</footer></data>"
                    ))
                     .build(),
-             **/
             Fixture.builder()
                    .path("/test")
                    .expects(asList(
@@ -177,25 +174,19 @@ public class XPathStreamReaderTest {
 
     @Theory
     public void test(Fixture fixture) throws Exception {
-        var iterator = PathIterator.fromAbsoluteXPath(fixture.path);
-        var count = 0;
+        final var iterator = PathIterator.fromAbsoluteXPath(fixture.path);
 
         try (final var in = getClass().getResourceAsStream(TEST_XML_FILE)) {
-            final var reader = new XPathStreamReader(factory.createXMLEventReader(in), iterator);
-            while (true) {
-                final var result = reader.read();
-                if (result == null) {
-                    break;
-                }
-                if (++count > fixture.expects.size()) {
-                    System.out.println("unexpected: " + result);
-                    continue;
-                }
-                assertThat(result).isEqualTo(fixture.expects.get(count - 1));
+            final var eventReader = factory.createXMLEventReader(in);
+            final var test = XPathStreamReader
+                    .readAll(eventReader, iterator)
+                    .test()
+                    .assertComplete()
+                    .assertValueCount(fixture.expects.size());
+            for (int i = 0; i < fixture.expects.size(); ++i) {
+                test.assertValueAt(i, fixture.expects.get(i));
             }
         }
-
-        assertThat(count).isEqualTo(fixture.expects.size());
     }
 
 }
